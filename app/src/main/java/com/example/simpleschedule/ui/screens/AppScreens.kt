@@ -2908,6 +2908,29 @@ fun WebViewImportScreen(
                 var showDownloadSuccessDialog by remember { mutableStateOf(false) }
                 var downloadedTemplateFile by remember { mutableStateOf<File?>(null) }
 
+                val startDownload: () -> Unit = {
+                    if (!isDownloadingTemplate) {
+                        isDownloadingTemplate = true
+                        coroutineScope.launch {
+                            val file = downloadCsvTemplate(context, CSV_TEMPLATE_URL)
+                            isDownloadingTemplate = false
+                            if (file != null && file.exists()) {
+                                downloadedTemplateFile = file
+                                showDownloadSuccessDialog = true
+                            } else {
+                                Toast.makeText(context, "直接下载未成功，已为您转至浏览器下载", Toast.LENGTH_SHORT).show()
+                                uriHandler.openUri(CSV_TEMPLATE_URL)
+                            }
+                        }
+                    }
+                }
+
+                val permissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission()
+                ) {
+                    startDownload()
+                }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2972,18 +2995,11 @@ fun WebViewImportScreen(
                     }
                     Button(
                         onClick = {
-                            if (isDownloadingTemplate) return@Button
-                            isDownloadingTemplate = true
-                            coroutineScope.launch {
-                                val file = downloadCsvTemplate(context, CSV_TEMPLATE_URL)
-                                isDownloadingTemplate = false
-                                if (file != null && file.exists()) {
-                                    downloadedTemplateFile = file
-                                    showDownloadSuccessDialog = true
-                                } else {
-                                    Toast.makeText(context, "直接下载未成功，已为您转至浏览器下载", Toast.LENGTH_SHORT).show()
-                                    uriHandler.openUri(CSV_TEMPLATE_URL)
-                                }
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                                ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                                permissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            } else {
+                                startDownload()
                             }
                         },
                         enabled = !isDownloadingTemplate,

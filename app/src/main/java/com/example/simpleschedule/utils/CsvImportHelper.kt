@@ -42,6 +42,7 @@ suspend fun downloadCsvTemplate(context: Context, urlString: String): File? = wi
             connection.connectTimeout = 8000
             connection.readTimeout = 8000
             connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) SimpleScheduleApp")
             if (connection.responseCode == 200) {
                 val bytes = connection.inputStream.use { it.readBytes() }
                 if (bytes.isNotEmpty() && bytes.size < 1000000) {
@@ -61,14 +62,21 @@ suspend fun downloadCsvTemplate(context: Context, urlString: String): File? = wi
 }
 
 fun saveCsvToDownloads(context: Context, bytes: ByteArray, fileName: String): File {
-    val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-    if (!publicDownloads.exists()) {
-        publicDownloads.mkdirs()
+    // 1. 先在应用私有外部存储目录写入一份保证永远存在且可读的物理文件（兼容所有安卓版本且免权限）
+    val appPrivateDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+    if (appPrivateDir != null && !appPrivateDir.exists()) {
+        appPrivateDir.mkdirs()
     }
-    val targetFile = File(publicDownloads, fileName)
-
+    val fallbackFile = File(appPrivateDir ?: context.filesDir, fileName)
     try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        fallbackFile.writeBytes(bytes)
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+
+    // 2. Android 10+ (API 29+): 通过 MediaStore.Downloads 写入公共下载目录（系统级支持，无需申请危险存储权限）
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        try {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -82,19 +90,34 @@ fun saveCsvToDownloads(context: Context, bytes: ByteArray, fileName: String): Fi
                     os.flush()
                 }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-    } catch (e: Exception) {
-        e.printStackTrace()
+    } else {
+        // 3. Android 9 及以下 (API < 29): 尝试向公共存储目录写入文件并刷新媒体库
+        try {
+            val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!publicDownloads.exists()) {
+                publicDownloads.mkdirs()
+            }
+            val publicFile = File(publicDownloads, fileName)
+            publicFile.writeBytes(bytes)
+            MediaScannerConnection.scanFile(context, arrayOf(publicFile.absolutePath), arrayOf("text/csv"), null)
+            if (publicFile.exists() && publicFile.canRead()) {
+                return publicFile
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
-    try {
-        targetFile.writeBytes(bytes)
-        MediaScannerConnection.scanFile(context, arrayOf(targetFile.absolutePath), arrayOf("text/csv"), null)
-    } catch (e: Exception) {
-        e.printStackTrace()
+    // 4. 检查公共下载目录是否已经存在可读文件（包括 MediaStore 写入或者已有文件）
+    val publicCandidate = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
+    if (publicCandidate.exists() && publicCandidate.canRead()) {
+        return publicCandidate
     }
 
-    return targetFile
+    return fallbackFile
 }
 
 fun openFileManagerForFile(context: Context, file: File?) {
