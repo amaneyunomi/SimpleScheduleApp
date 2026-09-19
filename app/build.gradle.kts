@@ -13,8 +13,8 @@ android {
         applicationId = "com.seekai.simpleschedule"
         minSdk = 24
         targetSdk = 37
-        versionCode = 18
-        versionName = "2.7.5.0916"
+        versionCode = 19
+        versionName = "2.8.0.0919"
 
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

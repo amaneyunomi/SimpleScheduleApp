@@ -1,7 +1,7 @@
 {
-  "versionCode": 18,
-  "versionName": "2.7.2.0911",
-  "changelog": "1. 新增悬浮底栏样式，以及页面滑动动画。\n2. 优化教务网页导入自适应兼容性，解决湖州师范大学新教务登录页面弹窗及二维码显示不全的问题。",
+  "versionCode": 19,
+  "versionName": "2.8.0.0919",
+  "changelog": "1. 新增从 CSV 文件导入课表功能，支持智能识别课程、星期、节次与单双周。\n2. 课表模板支持应用内一键下载并可直接唤起系统文件管理器查看与编辑。\n3. 时间表管理新增时间节点批量删除与自动重排功能。\n4. 软件内更新统计归档至 inAppUpdate 独立目录，适配最新 Android 16。",
   "apkUrl": "https://www.lingflame.cn/download.php?from=app",
   "forceUpdate": false
 }
