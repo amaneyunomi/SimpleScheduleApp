@@ -1,8 +1,24 @@
 package com.example.simpleschedule.utils
 
+import android.app.DownloadManager
+import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
+import android.media.MediaScannerConnection
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.CharacterCodingException
@@ -11,6 +27,119 @@ import java.nio.charset.CodingErrorAction
 import kotlin.math.abs
 
 private val courseColors = listOf("blue", "pink", "purple", "slate", "indigo", "rose")
+
+suspend fun downloadCsvTemplate(context: Context, urlString: String): File? = withContext(Dispatchers.IO) {
+    val urlsToTry = listOf(
+        urlString,
+        "https://www.lingflame.cn/schedule_template.csv"
+    )
+    for (currentUrl in urlsToTry) {
+        var connection: HttpURLConnection? = null
+        try {
+            val url = URL(currentUrl)
+            connection = url.openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = false
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.requestMethod = "GET"
+            if (connection.responseCode == 200) {
+                val bytes = connection.inputStream.use { it.readBytes() }
+                if (bytes.isNotEmpty() && bytes.size < 1000000) {
+                    val decoded = decodeCsvBytes(bytes)
+                    if (decoded.contains("课程") || decoded.contains(",")) {
+                        return@withContext saveCsvToDownloads(context, bytes, "课表模板.csv")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            connection?.disconnect()
+        }
+    }
+    null
+}
+
+fun saveCsvToDownloads(context: Context, bytes: ByteArray, fileName: String): File {
+    val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+    if (!publicDownloads.exists()) {
+        publicDownloads.mkdirs()
+    }
+    val targetFile = File(publicDownloads, fileName)
+
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = context.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "text/csv")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri != null) {
+                resolver.openOutputStream(uri)?.use { os ->
+                    os.write(bytes)
+                    os.flush()
+                }
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+
+    try {
+        targetFile.writeBytes(bytes)
+        MediaScannerConnection.scanFile(context, arrayOf(targetFile.absolutePath), arrayOf("text/csv"), null)
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+
+    return targetFile
+}
+
+fun openFileManagerForFile(context: Context, file: File?) {
+    // 1. 首选方案：尝试唤起系统下载管理的 Download 视图（适配大部分品牌手机与原生系统）
+    try {
+        val downloadIntent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (downloadIntent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(downloadIntent)
+            return
+        }
+    } catch (_: Exception) {}
+
+    // 2. 次选方案：通过 DocumentsUI/SAF 协议打开 Download 目录
+    try {
+        val downloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val uri = Uri.parse(downloadFolder.absolutePath)
+        val folderIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "resource/folder")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (folderIntent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(folderIntent)
+            return
+        }
+    } catch (_: Exception) {}
+
+    // 3. 备选方案：通过 FileProvider 唤起系统应用选择器
+    try {
+        if (file != null && file.exists()) {
+            val authority = "${context.packageName}.fileprovider"
+            val contentUri = FileProvider.getUriForFile(context, authority, file)
+            val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(contentUri, "*/*")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(viewIntent, "选择文件管理器查看"))
+            return
+        }
+    } catch (_: Exception) {}
+
+    // 4. 兜底提示
+    Toast.makeText(context, "课表模板已保存至「下载」目录，请打开手机自带「文件管理」查看喵！", Toast.LENGTH_LONG).show()
+}
 
 fun parseCourseCsv(inputStream: InputStream): String? {
     return parseCourseCsv(decodeCsvBytes(inputStream.readBytes()))

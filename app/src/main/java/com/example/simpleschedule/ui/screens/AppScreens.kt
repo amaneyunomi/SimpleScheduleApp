@@ -13,7 +13,9 @@ import com.example.simpleschedule.receiver.buildCourseNotification
 import com.example.simpleschedule.receiver.NotificationState
 
 import android.annotation.SuppressLint
+import java.io.File
 import java.io.InputStream
+import kotlinx.coroutines.launch
 import jxl.Workbook
 import android.app.Application
 import android.app.DatePickerDialog
@@ -1737,7 +1739,7 @@ enum class ImportStage {
     CSV_IMPORT
 }
 
-private const val CSV_TEMPLATE_URL = "https://github.com/amaneyunomi/SimpleScheduleApp/releases/download/publish/default.CSV"
+private const val CSV_TEMPLATE_URL = "https://www.lingflame.cn/download.php?type=template"
 
 @Composable
 fun SystemCard(
@@ -2899,7 +2901,12 @@ fun WebViewImportScreen(
 
             ImportStage.CSV_IMPORT -> {
                 val uriHandler = LocalUriHandler.current
+                val context = LocalContext.current
+                val coroutineScope = rememberCoroutineScope()
                 var hasReadCsvInstructions by remember { mutableStateOf(false) }
+                var isDownloadingTemplate by remember { mutableStateOf(false) }
+                var showDownloadSuccessDialog by remember { mutableStateOf(false) }
+                var downloadedTemplateFile by remember { mutableStateOf<File?>(null) }
 
                 Row(
                     modifier = Modifier
@@ -2964,7 +2971,22 @@ fun WebViewImportScreen(
                         Text("我已经仔细阅读过上面的说明", color = textColor, fontSize = 16.sp)
                     }
                     Button(
-                        onClick = { uriHandler.openUri(CSV_TEMPLATE_URL) },
+                        onClick = {
+                            if (isDownloadingTemplate) return@Button
+                            isDownloadingTemplate = true
+                            coroutineScope.launch {
+                                val file = downloadCsvTemplate(context, CSV_TEMPLATE_URL)
+                                isDownloadingTemplate = false
+                                if (file != null && file.exists()) {
+                                    downloadedTemplateFile = file
+                                    showDownloadSuccessDialog = true
+                                } else {
+                                    Toast.makeText(context, "直接下载未成功，已为您转至浏览器下载", Toast.LENGTH_SHORT).show()
+                                    uriHandler.openUri(CSV_TEMPLATE_URL)
+                                }
+                            }
+                        },
+                        enabled = !isDownloadingTemplate,
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = RoundedCornerShape(28.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -2972,7 +2994,17 @@ fun WebViewImportScreen(
                             contentColor = Color.White
                         )
                     ) {
-                        Text("点击此处获取模板", fontSize = 16.sp)
+                        if (isDownloadingTemplate) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("正在下载模板...", fontSize = 16.sp)
+                        } else {
+                            Text("点击此处获取模板", fontSize = 16.sp)
+                        }
                     }
                     Button(
                         onClick = {
@@ -2990,6 +3022,93 @@ fun WebViewImportScreen(
                     ) {
                         Text("选择 CSV 文件", fontSize = 16.sp)
                     }
+                }
+
+                if (showDownloadSuccessDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showDownloadSuccessDialog = false },
+                        icon = {
+                            Icon(
+                                Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF10B981),
+                                modifier = Modifier.size(36.dp)
+                            )
+                        },
+                        title = {
+                            Text(
+                                "课表模板下载完成",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        },
+                        text = {
+                            Column {
+                                Text(
+                                    "课表模板已成功保存至手机系统「下载」目录：",
+                                    fontSize = 14.sp,
+                                    color = textColor.copy(alpha = 0.8f)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isDark) Color(0xFF27272A) else Color(0xFFF4F4F5),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Description,
+                                            contentDescription = null,
+                                            tint = Color(0xFF9A5264),
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text("课表模板.csv", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textColor)
+                                            Text("存储路径: Download/课表模板.csv", fontSize = 12.sp, color = textColor.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    "是否立即前往系统文件管理器查看此文件？\n您可以对其进行编辑、重命名或分享发送给同学。",
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                    color = textColor.copy(alpha = 0.7f)
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    showDownloadSuccessDialog = false
+                                    openFileManagerForFile(context, downloadedTemplateFile)
+                                },
+                                shape = RoundedCornerShape(20.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF9A5264),
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Icon(Icons.Rounded.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("前往文件管理器", fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDownloadSuccessDialog = false }) {
+                                Text("稍后再说", color = textColor.copy(alpha = 0.6f))
+                            }
+                        },
+                        containerColor = if (isDark) Color(0xFF18181B) else Color.White,
+                        titleContentColor = textColor,
+                        textContentColor = textColor.copy(alpha = 0.8f),
+                        shape = RoundedCornerShape(24.dp)
+                    )
                 }
             }
         }
